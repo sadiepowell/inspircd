@@ -76,6 +76,7 @@ private:
 	CommandVersion cmdversion;
 	Numeric::Numeric numeric003;
 	Numeric::Numeric numeric004;
+	std::string icon;
 
 	/** Returns a list of user or channel mode characters.
 	 * Used for constructing the parts of the mode list in the 004 numeric.
@@ -171,6 +172,11 @@ public:
 		cmdadmin.admindesc = tag->getString("description");
 		cmdadmin.adminemail = tag->getString("email", "noreply@" + ServerInstance->Config->GetServerName(), 1);
 
+		const auto& servertag = ServerInstance->Config->ConfValue("server");
+		icon = servertag->getString("icon", "", [](const auto& value) {
+			return value.compare(0, 8, "https://", 8) == 0;
+		});
+
 		Rebuild004();
 
 		cmdversion.BuildNumerics();
@@ -238,6 +244,12 @@ public:
 	void Prioritize() override
 	{
 		ServerInstance->Modules.SetPriority(this, I_OnUserConnect, PRIORITY_FIRST);
+	}
+
+	void OnBuildISupport(ISupport::TokenMap& tokens) override
+	{
+		if (!icon.empty())
+			tokens["ICON"] = icon;
 	}
 
 	void OnBuildClassISupport(const std::shared_ptr<ConnectClass>& klass, ISupport::TokenMap& tokens) override
