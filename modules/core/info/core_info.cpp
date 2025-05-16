@@ -78,6 +78,7 @@ private:
 	CommandVersion cmdversion;
 	Numeric::Numeric numeric003;
 	Numeric::Numeric numeric004;
+	std::string icon;
 
 	static std::string BuildMaxTargets(LocalUser* user)
 	{
@@ -190,6 +191,11 @@ public:
 		cmdadmin.admindesc = tag->getString("description");
 		cmdadmin.adminemail = tag->getString("email", "noreply@" + ServerInstance->Config->GetServerName(), 1);
 
+		const auto& servertag = ServerInstance->Config->ConfValue("server");
+		icon = servertag->getString("icon", "", [](const auto& value) {
+			return value.starts_with("https://");
+		});
+
 		Rebuild004();
 
 		cmdversion.BuildNumerics();
@@ -255,6 +261,9 @@ public:
 
 	void OnBuildISupport(ISupport::TokenMap& tokens) override
 	{
+		if (!icon.empty())
+			tokens["ICON"] = icon;
+
 		tokens["TARGMAX"] = BuildMaxTargets(nullptr);
 	}
 
