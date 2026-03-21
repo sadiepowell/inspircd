@@ -30,6 +30,7 @@
 #include "modules/ctctags.h"
 #include "modules/exemption.h"
 #include "modules/extban.h"
+#include "modules/ircv3_replies.h"
 #include "modules/isupport.h"
 #include "modules/who.h"
 #include "modules/whois.h"
@@ -42,6 +43,44 @@ enum
 	// From IRCv3 sasl-3.1.
 	RPL_LOGGEDIN = 900,
 	RPL_LOGGEDOUT = 901
+};
+
+struct SharedData final
+{
+	// A dynamic reference to the account provider API.
+	Account::ProviderAPI accountproviderapi;
+
+	// A reference to the account-registration cap.
+	Cap::Capability& accountregistrationcap;
+
+	// A pointer to the REGISTER command.
+	Command* cmdregister;
+
+	// A pointer to the VERIFY command.
+	Command* cmdverify;
+
+	// API for sending a FAIL message.
+	IRCv3::Replies::Fail failrpl;
+
+	// The registraton flags sent by services.
+	uint8_t flags = Account::REGISTER_NONE;
+
+	// Provider for the REGISTER event.
+	ClientProtocol::EventProvider registerevprov;
+
+	// Provider for the VERIFY event.
+	ClientProtocol::EventProvider verifyevprov;
+
+	SharedData(Module* mod, Cap::Capability& cap, Command& cmdr, Command& cmdv)
+		: accountproviderapi(mod)
+		, accountregistrationcap(cap)
+		, cmdregister(&cmdr)
+		, cmdverify(&cmdv)
+		, failrpl(mod)
+		, registerevprov(mod, cmdregister->name)
+		, verifyevprov(mod, cmdverify->name)
+	{
+	}
 };
 
 class AccountExtItemImpl final
@@ -82,6 +121,162 @@ public:
 	}
 };
 
+class AccountRegistrationCap final
+	: public Cap::Capability
+{
+private:
+	std::string capvalue;
+
+	bool OnRequest(LocalUser* user, bool adding) override
+	{
+		return OnList(user);
+	}
+
+	bool OnList(LocalUser* user) override
+	{
+		return !!data.accountproviderapi;
+	}
+
+	const std::string* GetValue(LocalUser* user) const override
+	{
+		return &capvalue;
+	}
+
+public:
+	SharedData& data;
+
+	// Updates the value of the capability and notifies clients if it has changed.
+	void UpdateValue(uint8_t rf)
+	{
+		std::string newcapvalue;
+		if (rf & Account::REGISTER_BEFORE_CONNECT)
+			newcapvalue.append("before-connect");
+
+		if (rf & Account::REGISTER_CUSTOM_ACCOUNT_NAME)
+			newcapvalue.append(newcapvalue.empty() ? "" : ",").append("custom-account-name");
+
+		if (rf & Account::REGISTER_EMAIL_REQUIRED)
+			newcapvalue.append(newcapvalue.empty() ? "" : ",").append("email-required");
+
+		data.flags = rf;
+		if (newcapvalue != capvalue)
+		{
+			capvalue = newcapvalue;
+			NotifyValueChange();
+		}
+	}
+
+	AccountRegistrationCap(Module* mod, SharedData& sd)
+		: Cap::Capability(mod, "draft/account-registration")
+		, data(sd)
+	{
+	}
+};
+
+class CommandRegister final
+	: public SplitCommand
+{
+private:
+	SharedData& data;
+
+public:
+	CommandRegister(Module* mod, SharedData& sd)
+		: SplitCommand(mod, "REGISTER", 3)
+		, data(sd)
+	{
+		syntax = { "<account>|* <email>|* <password>" };
+		works_before_reg = true;
+	}
+
+	CmdResult HandleLocal(LocalUser* user, const Params& parameters) override
+	{
+		if (!data.accountregistrationcap.IsEnabled(user))
+			return CmdResult::FAILURE;
+
+		if (!user->IsFullyConnected() && !(data.flags & Account::REGISTER_BEFORE_CONNECT))
+		{
+			data.failrpl.Send(user, this, "COMPLETE_CONNECTION_REQUIRED", "You must be fully connected to use this command.");
+			return CmdResult::FAILURE;
+		}
+
+		auto account = user->nick;
+		if (parameters[0] != "*" && !irc::equals(parameters[0], user->nick))
+		{
+			if (!(data.flags & Account::REGISTER_CUSTOM_ACCOUNT_NAME))
+			{
+				data.failrpl.Send(user, this, "ACCOUNT_NAME_MUST_BE_NICK", parameters[0], "Your account name must be your nickname on this network.");
+				return CmdResult::FAILURE;
+			}
+
+			if (!ServerInstance->IsNick(parameters[0]))
+			{
+				data.failrpl.Send(user, this, "BAD_ACCOUNT_NAME",  parameters[0], "The account name you specified is invalid");
+				return CmdResult::FAILURE;
+			}
+
+			account = parameters[0];
+		}
+		else if (!(user->connected & User::CONN_USER))
+		{
+			data.failrpl.Send(user, this, "NEED_NICK", '*', "You must have picked a nickname to use this command.");
+			return CmdResult::FAILURE;
+		}
+
+		if (parameters[1] == "*" && (data.flags & Account::REGISTER_EMAIL_REQUIRED))
+		{
+			data.failrpl.Send(user, this, "INVALID_EMAIL", account, "The email address you specified is invalid.");
+			return CmdResult::FAILURE;
+		}
+
+		if (!data.accountproviderapi)
+		{
+			data.failrpl.Send(user, this, "TEMPORARILY_UNAVAILABLE", account, "Accounts can not be registered right now. Please try again later.");
+			return CmdResult::FAILURE;
+		}
+
+		data.accountproviderapi->Register(user, account, parameters[1], parameters[2]);
+		return CmdResult::SUCCESS;
+	}
+};
+
+class CommandVerify final
+	: public SplitCommand
+{
+private:
+	SharedData& data;
+
+public:
+	CommandVerify(Module* mod, SharedData& sd)
+		: SplitCommand(mod, "VERIFY", 2)
+		, data(sd)
+	{
+		syntax = { "<account>|* <code>" };
+		works_before_reg = true;
+	}
+
+	CmdResult HandleLocal(LocalUser* user, const Params& parameters) override
+	{
+		if (!data.accountregistrationcap.IsEnabled(user))
+			return CmdResult::FAILURE;
+
+		if (!user->IsFullyConnected() && !(data.flags & Account::REGISTER_BEFORE_CONNECT))
+		{
+			data.failrpl.Send(user, this, "COMPLETE_CONNECTION_REQUIRED", "You must be fully connected to use this command.");
+			return CmdResult::FAILURE;
+		}
+
+		const auto& account = parameters[0] == "*" ? user->nick : parameters[0];
+		if (!data.accountproviderapi)
+		{
+			data.failrpl.Send(user, this, "TEMPORARILY_UNAVAILABLE", account, "Accounts can not be verified right now. Please try again later.");
+			return CmdResult::FAILURE;
+		}
+
+		data.accountproviderapi->Verify(user, account, parameters[1]);
+		return CmdResult::SUCCESS;
+	}
+};
+
 class AccountAPIImpl final
 	: public Account::APIBase
 {
@@ -91,13 +286,18 @@ private:
 	ListExtItem<Account::NickList> accountnicksext;
 	UserModeReference identifiedmode;
 
+	AccountRegistrationCap& accountregistrationcap;
+	SharedData& data;
+
 public:
-	AccountAPIImpl(Module* mod)
+	AccountAPIImpl(Module* mod, AccountRegistrationCap& cap, SharedData& sd)
 		: Account::APIBase(mod)
 		, accountext(mod)
 		, accountidext(mod, "accountid", ExtensionType::USER, true)
 		, accountnicksext(mod, "accountnicks", ExtensionType::USER, true)
 		, identifiedmode(mod, "u_registered")
+		, accountregistrationcap(cap)
+		, data(sd)
 	{
 	}
 
@@ -124,6 +324,33 @@ public:
 		// Check whether their current nick is in their nick list.
 		Account::NickList* nicks = accountnicksext.Get(user);
 		return nicks && nicks->find(user->nick) != nicks->end();
+	}
+
+	void RegisterCallback(LocalUser* user, const std::string& account, const std::string& code, const std::string& message) override
+	{
+		ClientProtocol::Message protomsg("REGISTER");
+		protomsg.PushParamRef(code);
+		protomsg.PushParamRef(account);
+		protomsg.PushParamRef(message);
+
+		ClientProtocol::Event protoev(data.registerevprov, protomsg);
+		user->Send(protoev);
+	}
+
+	void VerifyCallback(LocalUser* user, const std::string& account, const std::string& message) override
+	{
+		ClientProtocol::Message protomsg("VERIFY");
+		protomsg.PushParam("SUCCESS");
+		protomsg.PushParamRef(account);
+		protomsg.PushParamRef(message);
+
+		ClientProtocol::Event protoev(data.registerevprov, protomsg);
+		user->Send(protoev);
+	}
+
+	void SetRegisterFlags(uint8_t rf) override
+	{
+		accountregistrationcap.UpdateValue(rf);
 	}
 };
 
@@ -185,11 +412,15 @@ class ModuleAccount final
 	, public Whois::EventListener
 {
 private:
+	SharedData data;
 	CallerID::API calleridapi;
 	CheckExemption::EventProvider exemptionprov;
 	SimpleChannelMode reginvitemode;
 	SimpleChannelMode regmoderatedmode;
 	SimpleUserMode regdeafmode;
+	AccountRegistrationCap accountregistrationcap;
+	CommandRegister cmdregister;
+	CommandVerify cmdverify;
 	AccountAPIImpl accountapi;
 	AccountExtBan accountextban;
 	UnauthedExtBan unauthedextban;
@@ -201,12 +432,16 @@ public:
 		, ISupport::EventListener(this)
 		, Who::EventListener(this)
 		, Whois::EventListener(this)
+		, data(this, accountregistrationcap, cmdregister, cmdverify)
 		, calleridapi(this)
 		, exemptionprov(this)
 		, reginvitemode(this, "reginvite", 'R')
 		, regmoderatedmode(this, "regmoderated", 'M')
 		, regdeafmode(this, "regdeaf", 'R')
-		, accountapi(this)
+		, accountregistrationcap(this, data)
+		, cmdregister(this, data)
+		, cmdverify(this, data)
+		, accountapi(this, accountregistrationcap, data)
 		, accountextban(this, accountapi)
 		, unauthedextban(this, accountapi)
 	{

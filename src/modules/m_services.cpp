@@ -38,6 +38,100 @@ enum
 	ERR_TOPICLOCK = 744,
 };
 
+class ServicesAccountProvider final
+	: public Account::ProviderAPIBase
+	, public ServerProtocol::LinkEventListener
+{
+private:
+	std::string target;
+
+	void OnServerLink(const Server* server) override
+	{
+		UpdateStatus(*server, true);
+	}
+
+	void OnServerSplit(const Server* server, bool error) override
+	{
+		UpdateStatus(*server, false);
+	}
+
+	template<typename... Args>
+	void SendAccount(User* source, Args&&... args)
+	{
+		CommandBase::Params params;
+		params.push_back(source->uuid);
+		(params.push_back(ConvToStr(args)), ...);
+
+		auto& last = params.back();
+		if (last.empty() || last[0] == ':' || last.find(' ') != std::string::npos)
+			last.insert(last.begin(), ':');
+
+		// TODO: add the following with tags
+		// ip address
+		// tls status
+		// fingerprints
+		ServerInstance->PI->SendEncapsulatedData(target, "ACCOUNT", params);
+	}
+
+	void SetAvailable(bool online)
+	{
+		auto *api = ServerInstance->Modules.FindService(SERVICE_DATA, "accountproviderapi");
+		if (online && api != this)
+			ServerInstance->Modules.AddService(*this);
+		else if (!online && api == this)
+			ServerInstance->Modules.DelService(*this);
+	}
+
+	void UpdateStatus(const Server& server, bool online)
+	{
+		if (irc::equals(target, server.GetName()))
+		{
+			ServerInstance->Logs.Debug(MODNAME, "Services server {} ({}) {}.", server.GetName(),
+				server.GetId(), online ? "came online" : "went offline");
+			SetAvailable(online);
+		}
+	}
+
+public:
+	ServicesAccountProvider(Module* mod)
+		: Account::ProviderAPIBase(mod)
+		, ServerProtocol::LinkEventListener(mod)
+	{
+	}
+
+	void Register(User* user, const std::string& account, const std::string& email, const std::string& password) override
+	{
+		SendAccount(user, "REGISTER", account, email, password);
+	}
+
+	void Verify(User* user, const std::string& account, const std::string& code) override
+	{
+		SendAccount(user, "VERIFY", account, code);
+	}
+
+	void SetTarget(const std::string& newtarget)
+	{
+		if (target == newtarget)
+			return; // Nothing has changed.
+
+		target = newtarget;
+		ProtocolInterface::ServerList servers;
+		ServerInstance->PI->GetServerList(servers);
+		for (const auto& server : servers)
+		{
+			if (irc::equals(target, server.servername))
+			{
+				ServerInstance->Logs.Debug(MODNAME, "Changed the services server to {}.", server.servername);
+				SetAvailable(true);
+				return;
+			}
+		}
+
+		ServerInstance->Logs.Debug(MODNAME, "The services server ({}) is currently unavailable.", target);
+		SetAvailable(false);
+	}
+};
+
 class RegisteredChannel final
 	: public SimpleChannelMode
 {
@@ -171,6 +265,75 @@ public:
 	XLine* Generate(time_t settime, unsigned long duration, const std::string& source, const std::string& reason, const std::string& nick) override
 	{
 		return new SVSHold(settime, duration, source, reason, nick);
+	}
+};
+
+class CommandAccount final
+	: public Command
+{
+
+private:
+	Account::API& accountapi;
+
+	CmdResult HandleRegister(User* source, LocalUser* target, const Params& parameters)
+	{
+		// <uuid> REGISTER <account> <code> [<reserved>...] :<message>
+		// * <code> can be either SUCCESS or VERIFICATION_REQUIRED
+		if (parameters.size() < 5)
+			return CmdResult::INVALID;
+
+		if (accountapi)
+			accountapi->RegisterCallback(target, parameters[2], parameters[3], parameters.back());
+
+		return CmdResult::SUCCESS;
+	}
+
+	CmdResult HandleVerify(User* source, LocalUser* target, const Params& parameters)
+	{
+		// <uuid> VERIFY <account> [<reserved>...] :<message>
+		if (parameters.size() < 4)
+			return CmdResult::INVALID;
+
+		if (accountapi)
+			accountapi->VerifyCallback(target, parameters[2], parameters.back());
+
+		return CmdResult::SUCCESS;
+	}
+
+public:
+	CommandAccount(Module* mod, Account::API& api)
+		: Command(mod, "ACCOUNT", 2)
+		, accountapi(api)
+	{
+		access_needed = CmdAccess::SERVER;
+	}
+
+	CmdResult Handle(User* user, const Params& parameters) override
+	{
+		// The command can only be executed by remote services servers.
+		if (IS_LOCAL(user) || !user->server->IsService())
+			return CmdResult::FAILURE;
+
+		auto* target = ServerInstance->Users.FindUUID(parameters[0]);
+		if (!target)
+			return CmdResult::FAILURE;
+
+		auto* ltarget = IS_LOCAL(target);
+		if (!ltarget)
+			return CmdResult::SUCCESS; // Their server will handle this.
+
+		if (irc::equals(parameters[1], "REGISTER"))
+			return HandleRegister(user, ltarget, parameters);
+
+		if (irc::equals(parameters[1], "VERIFY"))
+			return HandleVerify(user, ltarget, parameters);
+
+		return CmdResult::SUCCESS;
+	}
+
+	RouteDescriptor GetRouting(User* user, const Params& parameters) override
+	{
+		return ROUTE_OPT_UCAST(parameters[0]);
 	}
 };
 
@@ -520,6 +683,7 @@ class ModuleServices final
 {
 private:
 	Account::API accountapi;
+	ServicesAccountProvider accountprovapi;
 	RegisteredChannel registeredcmode;
 	RegisteredUser registeredumode;
 	ServiceTag servicetag;
@@ -528,6 +692,7 @@ private:
 	BoolExtItem auspexext;
 	StringExtItem mlockext;
 	BoolExtItem topiclockext;
+	CommandAccount accountcmd;
 	CommandSVSCMode svscmodecmd;
 	CommandSVSHold svsholdcmd;
 	CommandSVSJoin svsjoincmd;
@@ -581,6 +746,7 @@ public:
 		, ServerProtocol::RouteEventListener(this)
 		, Stats::EventListener(this)
 		, accountapi(this)
+		, accountprovapi(this)
 		, registeredcmode(this)
 		, registeredumode(this)
 		, servicetag(this)
@@ -588,6 +754,7 @@ public:
 		, auspexext(this, "auspex", ExtensionType::CHANNEL, true)
 		, mlockext(this, "mlock", ExtensionType::CHANNEL, true)
 		, topiclockext(this, "topiclock", ExtensionType::CHANNEL, true)
+		, accountcmd(this, accountapi)
 		, svscmodecmd(this)
 		, svsholdcmd(this)
 		, svsjoincmd(this)
@@ -613,6 +780,27 @@ public:
 	{
 		const auto& tag = ServerInstance->Config->ConfValue("servicesintegration");
 		accountoverrideshold = tag->getBool("accountoverrideshold");
+		accountprovapi.SetTarget(tag->getString("server", ServerInstance->Config->ConfValue("sasl")->getString("target")));
+	}
+
+
+	void OnDecodeMetadata(Extensible* target, const std::string& extname, const std::string& extdata) override
+	{
+		if (target || !accountapi || !irc::equals(extname, "account-registration"))
+			return;
+
+		uint8_t flags = Account::REGISTER_NONE;
+		irc::commasepstream ss(extdata);
+		for (std::string flag; ss.GetToken(flag); )
+		{
+			if (irc::equals(flag, "before-connect"))
+				flags |= Account::REGISTER_BEFORE_CONNECT;
+			else if (irc::equals(flag, "custom-account-name"))
+				flags |= Account::REGISTER_CUSTOM_ACCOUNT_NAME;
+			else if (irc::equals(flag, "email-required"))
+				flags |= Account::REGISTER_EMAIL_REQUIRED;
+		}
+		accountapi->SetRegisterFlags(flags);
 	}
 
 	ModResult OnRouteMessage(const Channel* channel, const Server* server) override

@@ -26,9 +26,27 @@ namespace Account
 	class API;
 	class APIBase;
 	class EventListener;
+	class ProviderAPI;
+	class ProviderAPIBase;
 
 	/** Encapsulates a list of nicknames associated with an account. */
 	typedef insp::flat_set<std::string, irc::insensitive_swo> NickList;
+
+	enum RegisterFlags
+		: uint8_t
+	{
+		/** No special flags apply to the REGISTER command. */
+		REGISTER_NONE = 0,
+
+		/** The REGISTER command can be used when not fully connected. */
+		REGISTER_BEFORE_CONNECT = 1,
+
+		/** The REGISTER command can contain a custom account name. */
+		REGISTER_CUSTOM_ACCOUNT_NAME = 2,
+
+		/** The REGISTER command requires an email address. */
+		REGISTER_EMAIL_REQUIRED = 4,
+	};
 }
 
 /** Defines the interface for the account API. */
@@ -64,6 +82,26 @@ public:
 	* @return If the user is identified to their nickname then true; otherwise, false.
 	*/
 	virtual bool IsIdentifiedToNick(const User* user) = 0;
+
+	/** Controls the behaviour of the REGISTER command.
+	 * @param rf The flags to set.
+	 */
+	virtual void SetRegisterFlags(uint8_t rf) = 0;
+
+	/** Called when the result of an account registration has been ascertained.
+	 * @param user The user who attempted to register na account.
+	 * @param account The name of the account.
+	 * @param code A code that tells the client what to do next.
+	 * @param message A human-readable message to provide to the user.
+	 */
+	virtual void RegisterCallback(LocalUser* user, const std::string& account, const std::string& code, const std::string& message) = 0;
+
+	/** Called when the result of an account verification has been ascertained.
+	 * @param user The user who attempted to register na account.
+	 * @param account The name of the account.
+	 * @param message A human-readable message to provide to the user.
+	 */
+	virtual void VerifyCallback(LocalUser* user, const std::string& account, const std::string& message) = 0;
 };
 
 /** Allows modules to access information regarding user accounts. */
@@ -75,7 +113,6 @@ public:
 		: dynamic_reference<Account::APIBase>(parent, "accountapi")
 	{
 	}
-
 };
 
 /** Provides handlers for events relating to accounts. */
@@ -93,4 +130,29 @@ public:
 	 * @param account The name of the account if logging in or empty if logging out.
 	 */
 	virtual void OnAccountChange(User* user, const std::string& account) = 0;
+};
+
+/** Defines the interface for the account provider API. */
+class Account::ProviderAPIBase
+	: public DataProvider
+{
+public:
+	ProviderAPIBase(Module* mod)
+		: DataProvider(mod, "accountproviderapi")
+	{
+	}
+
+	virtual void Register(User* user, const std::string& account, const std::string& email, const std::string& password) = 0;
+	virtual void Verify(User* user, const std::string& account, const std::string& code) = 0;
+};
+
+/** Allows modules to provide backend support for accounts. */
+class Account::ProviderAPI final
+	: public dynamic_reference<Account::ProviderAPIBase>
+{
+public:
+	ProviderAPI(Module* mod)
+		: dynamic_reference<Account::ProviderAPIBase>(mod, "accountproviderapi")
+	{
+	}
 };
