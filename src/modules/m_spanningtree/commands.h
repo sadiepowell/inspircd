@@ -496,6 +496,22 @@ public:
 	CmdResult Handle(User* user, Params& params) override;
 };
 
+
+class CommandReply final
+	: public ServerOnlyServerCommand<CommandReply>
+{
+private:
+	ClientProtocol::EventProvider evprov;
+public:
+	CommandReply(Module* Creator, const std::string& Name)
+		: ServerOnlyServerCommand<CommandReply>(Creator, Name, 5)
+		, evprov(Creator, Name)
+	{
+	}
+	CmdResult HandleServer(TreeServer* server, Params& parameters);
+	RouteDescriptor GetRouting(User* user, const Params& parameters) override;
+};
+
 class SpanningTreeCommands final
 {
 public:
@@ -527,5 +543,8 @@ public:
 	CommandSInfo sinfo;
 	CommandNum num;
 	CommandLMode lmode;
+	CommandReply fail;
+	CommandReply warn;
+	CommandReply note;
 	SpanningTreeCommands(ModuleSpanningTree* module);
 };
