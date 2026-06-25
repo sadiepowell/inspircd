@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     if: "!contains(github.event.head_commit.message, '[skip windows ci]')"
-    runs-on: windows-2025
+    runs-on: ${{ matrix.system.runner }}
     env:
       BUILD_PATH: ${{ github.workspace }}/win/build
       BUILD_TYPE: ${{ github.event_name == 'release' && 'Release' || 'Debug' }}
@@ -22,7 +22,7 @@ jobs:
       - name: Setup MSVC
         uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
-          arch: x64
+          arch: ${{ matrix.system.msvc }}
 
       - name: Setup NSIS
         uses: negrutiu/nsis-install@v3
@@ -86,3 +86,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |-
           gh release upload ${{ github.event.release.tag_name }} $(Get-ChildItem InspIRCd-*.exe)
+
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - runner: windows-11-vs2026-arm
+            msvc: arm64
+          - runner: windows-2025-vs2026
+            msvc: x64
