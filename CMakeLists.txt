@@ -229,10 +229,7 @@ configure_path(
 )
 
 set(VERSION_FULL "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
-if(DEFINED DISTRIBUTION_LABEL)
-	# The builder specified an explicit distribution label.
-	set(VERSION_LABEL ${DISTRIBUTION_LABEL})
-elseif(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/.git")
+if(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/.git")
 	# The builder is building from Git, try to get the Git hash.
 	find_program(GIT_BINARY "git")
 	if(DEFINED GIT_BINARY)
@@ -245,11 +242,13 @@ elseif(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/.git")
 		)
 		if(NOT GIT_RESULT AND GIT_DESCRIPTION MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+([a-zA-Z0-9]*)-[0-9]+-g([a-f0-9]+)$")
 			set(VERSION_LABEL ${CMAKE_MATCH_2})
+			string(APPEND VERSION_FULL "-${VERSION_LABEL}")
 		endif()
 	endif()
 endif()
-if(DEFINED VERSION_LABEL)
-	string(APPEND VERSION_FULL "-${VERSION_LABEL}")
+if(DEFINED DISTRIBUTION_LABEL)
+	# The builder specified an explicit distribution label.
+	string(APPEND VERSION_FULL "+${DISTRIBUTION_LABEL}")
 endif()
 
 include_directories("include" "${PROJECT_BINARY_DIR}/include")
