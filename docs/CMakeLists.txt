@@ -21,6 +21,10 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
 endif()
 
 install_owned(
+	FILES "AUTHORS.txt" "LICENSE.txt"
+	DESTINATION "${DOC_DIR}"
+)
+install_owned(
 	DIRECTORY "conf/"
 	DESTINATION "${EXAMPLE_DIR}"
 )

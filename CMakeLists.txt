@@ -186,6 +186,13 @@ configure_path(
 	DESCRIPTION  "The directory to read and write data files to"
 )
 configure_path(
+	NAME         "DOC_DIR"
+	SOURCE_DEF   "docs"
+	PORTABLE_DEF "docs"
+	SYSTEM_DEF   "usr/share/doc/inspircd"
+	DESCRIPTION  "The directory to write documentation files to"
+)
+configure_path(
 	NAME         "EXAMPLE_DIR"
 	SOURCE_DEF   "${CONFIG_DIR}/examples"
 	PORTABLE_DEF "${CONFIG_DIR}/examples"
