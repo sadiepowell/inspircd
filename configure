@@ -31,12 +31,13 @@ import textwrap
 
 from src.python import common, console
 
-PROGRAM       = pathlib.Path(__file__).name
-CONFIG_CACHE  = common.ROOT / "configure.json"
-BUILD_DIR     = common.ROOT / "build"
-BUILD_DIR_REL = BUILD_DIR.relative_to(pathlib.Path.cwd())
-RUN_DIR       = common.ROOT / "run"
-RUN_DIR_REL   = RUN_DIR.relative_to(pathlib.Path.cwd())
+PROGRAM          = pathlib.Path(__file__).name
+CONFIG_CACHE     = common.ROOT / "configure.json"
+CONFIG_CACHE_REL = CONFIG_CACHE.relative_to(pathlib.Path.cwd())
+BUILD_DIR        = common.ROOT / "build"
+BUILD_DIR_REL    = BUILD_DIR.relative_to(pathlib.Path.cwd())
+RUN_DIR          = common.ROOT / "run"
+RUN_DIR_REL      = RUN_DIR.relative_to(pathlib.Path.cwd())
 
 
 def cmake_define(name, value):
@@ -67,14 +68,14 @@ parser.add_argument("--prefix",      type=str, metavar="DIR", help="The director
 parser.add_argument("--runtime-dir", type=str, metavar="DIR", help="The directory to write runtime files to")
 parser.add_argument("--script-dir",  type=str, metavar="DIR", help="The directory to install script files to")
 
-parser.add_argument("--clean",               action="store_true", help=f"Don't load {CONFIG_CACHE} in interactive mode")
+parser.add_argument("--clean",               action="store_true", help=f"Don't load {CONFIG_CACHE_REL} in interactive mode")
 parser.add_argument("--development",         action="store_true", help="Preconfigure for a development build")
 parser.add_argument("--disable-auto-extras", action="store_true", help="Disable automatically enabling extra modules")
 parser.add_argument("--disable-interactive", action="store_true", help="Disable interactive mode")
 parser.add_argument("--disable-ownership",   action="store_true", help="Disable file ownership")
 parser.add_argument("--portable",            action="store_true", help="Preconfigure paths for a portable install")
 parser.add_argument("--system",              action="store_true", help="Preconfigure paths for a system install")
-parser.add_argument("--update",              action="store_true", help=f"Regenerate the CMake build config from {CONFIG_CACHE}")
+parser.add_argument("--update",              action="store_true", help=f"Regenerate the CMake build config from {CONFIG_CACHE_REL}")
 
 parser.add_argument("--build-tool",         type=str, metavar="TOOL",   help="The build tool to generate build files for")
 parser.add_argument("--distribution-label", type=str, metavar="LABEL",  help="Specify a distribution label")
