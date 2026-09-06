@@ -193,7 +193,7 @@ configure_path(
 	DESCRIPTION  "The directory to install example config files to"
 )
 configure_path(
-	NAME LOG_DIR
+	NAME         "LOG_DIR"
 	SOURCE_DEF   "logs"
 	PORTABLE_DEF "logs"
 	SYSTEM_DEF   "var/log/inspircd"
@@ -224,7 +224,7 @@ configure_path(
 	NAME         "SCRIPT_DIR"
 	SOURCE_DEF   "."
 	PORTABLE_DEF "."
-	SYSTEM_DEF   "/usr/share/inspircd"
+	SYSTEM_DEF   "usr/share/inspircd"
 	DESCRIPTION  "The directory to install script files to"
 )
 
