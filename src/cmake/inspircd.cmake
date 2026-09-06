@@ -140,6 +140,7 @@ function(configure_path)
 		cmake_path(NORMAL_PATH ABSOLUTE_${OPT_NAME})
 	endif()
 	set(ABSOLUTE_${OPT_NAME} ${ABSOLUTE_${OPT_NAME}} CACHE INTERNAL "" FORCE)
+	message(STATUS "Path ${OPT_NAME} set to ${ABSOLUTE_${OPT_NAME}}")
 
 	install_owned(
 		DIRECTORY
