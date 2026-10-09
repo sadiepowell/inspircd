@@ -310,7 +310,7 @@ public:
 	{
 		auto* ssliohook = SSLIOHook::IsSSL(sock);
 		if (!ssliohook)
-			return nullptr;
+			return "";
 
 		auto* cert = ssliohook->GetCertificate();
 		if (!cert || !cert->IsUsable())
