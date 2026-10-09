@@ -142,6 +142,10 @@ void CommandStats::DoStats(Stats::Context& stats)
 				else if (ls->bind_protocol == IPPROTO_SCTP)
 					protocol = "sctp";
 #endif
+#ifdef IPPROTO_MPTCP
+				else if (ls->bind_protocol == IPPROTO_MPTCP)
+					protocol = "mptcp";
+#endif
 				else if (ls->bind_sa.family() == AF_INET || ls->bind_sa.family() == AF_INET6)
 					protocol = "tcp";
 
