@@ -34,6 +34,20 @@
 
 namespace
 {
+#ifdef IPPROTO_MPTCP
+	// Checks whether the system can create MPTCP sockets.
+	bool CanCreateMPTCPSocket()
+	{
+		auto fd = socket(AF_INET, SOCK_STREAM, IPPROTO_MPTCP);
+		if (fd >= 0)
+		{
+			SocketEngine::Close(fd);
+			return true;
+		}
+		return false;
+	}
+#endif
+
 #ifdef IPPROTO_SCTP
 	// Checks whether the system can create SCTP sockets.
 	bool CanCreateSCTPSocket()
@@ -135,10 +149,23 @@ size_t InspIRCd::BindPorts(FailedPortList& failed_ports)
 				{
 					if (insp::ascii_equals(protocol, "all"))
 					{
+#ifdef IPPROTO_MPTCP
+						protocols.push_back(CanCreateMPTCPSocket() ? IPPROTO_MPTCP : 0);
+#else
 						protocols.push_back(0); // IPPROTO_TCP
+#endif
+
 #ifdef IPPROTO_SCTP
 						if (CanCreateSCTPSocket())
 							protocols.push_back(IPPROTO_SCTP);
+#endif
+					}
+					else if (insp::ascii_equals(protocol, "mptcp"))
+					{
+#ifdef IPPROTO_MPTCP
+						protocols.push_back(IPPROTO_MPTCP);
+#else
+						failed_ports.emplace_back("Platform does not support MPTCP", tag);
 #endif
 					}
 					else if (insp::ascii_equals(protocol, "sctp"))
